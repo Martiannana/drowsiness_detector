@@ -34,6 +34,12 @@ class _DriverScreenState extends State<DriverScreen>
   Timer? _alertEscalationTimer;
   Timer? _autoStopTimer;
   Timer? _locationUpdateTimer;
+  Timer? _statusUpdateTimer;
+
+  // NEW: Alert tracking for passenger notifications
+  int _alertCount = 0;
+  DateTime? _firstAlertTime;
+  DateTime? _secondAlertTime;
 
   final _orientations = {
     DeviceOrientation.portraitUp: 0,
@@ -42,8 +48,12 @@ class _DriverScreenState extends State<DriverScreen>
     DeviceOrientation.landscapeRight: 270,
   };
 
+  DriverStatus? _localDriverStatus;
+  String? _driverId;
+  String? _busNumber;
+
   @override
-  bool get wantKeepAlive => true; // Keep widget alive
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -51,7 +61,6 @@ class _DriverScreenState extends State<DriverScreen>
     WidgetsBinding.instance.addObserver(this);
     _initializeFaceDetector();
     
-    // Delay camera initialization to ensure proper widget mounting
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeCamera();
       _startLocationTracking();
@@ -69,9 +78,12 @@ class _DriverScreenState extends State<DriverScreen>
         state == AppLifecycleState.detached) {
       _stopDetection();
     } else if (state == AppLifecycleState.resumed) {
-      // Re-initialize camera if needed
       if (!_cameraInitialized) {
         _initializeCamera();
+      }
+      final monitoringService = context.read<MonitoringService>();
+      if (_driverId != null && _busNumber != null) {
+        monitoringService.startMonitoringSpecificDriver(_busNumber!);
       }
     }
   }
@@ -102,7 +114,7 @@ class _DriverScreenState extends State<DriverScreen>
 
       _controller = CameraController(
         frontCamera,
-        ResolutionPreset.medium, // Changed from low to medium for better detection
+        ResolutionPreset.medium,
         imageFormatGroup: Platform.isAndroid 
             ? ImageFormatGroup.yuv420 
             : ImageFormatGroup.bgra8888,
@@ -119,7 +131,6 @@ class _DriverScreenState extends State<DriverScreen>
     } catch (e) {
       debugPrint("Camera initialization error: $e");
       _cameraInitialized = false;
-      // Retry initialization after a delay
       Timer(const Duration(seconds: 2), () {
         if (mounted && !_cameraInitialized) {
           _initializeCamera();
@@ -134,30 +145,57 @@ class _DriverScreenState extends State<DriverScreen>
     final auth = context.read<AuthService>();
 
     if (auth.currentUser != null) {
-      // Start monitoring service
-      await monitoringService.startDriverMonitoring(
-        auth.currentUser!.id,
-        auth.currentUser!.busNumber ?? 'Unknown',
+      _driverId = auth.currentUser!.id;
+      _busNumber = auth.currentUser!.busNumber ?? 'Unknown';
+
+      _localDriverStatus = DriverStatus(
+        driverId: _driverId!,
+        busNumber: _busNumber!,
+        alertLevel: DriverAlertLevel.none,
+        lastUpdate: DateTime.now(),
+        isDrowsy: false,
+        closedEyeFrames: 0,
+        isOnline: true,
       );
 
-      // Start location tracking with proper error handling
+      await monitoringService.startMonitoringSpecificDriver(_busNumber!);
+
       bool locationStarted = await locationService.startLocationTracking(
         onLocationUpdate: (Position position) {
-          // Update location in monitoring service
-          monitoringService.updateDriverLocation(
-              auth.currentUser!.id, position);
+          if (_localDriverStatus != null) {
+            _localDriverStatus = DriverStatus(
+              driverId: _driverId!,
+              busNumber: _busNumber!,
+              location: position,
+              alertLevel: _localDriverStatus!.alertLevel,
+              lastUpdate: DateTime.now(),
+              isDrowsy: _localDriverStatus!.isDrowsy,
+              closedEyeFrames: _localDriverStatus!.closedEyeFrames,
+              isOnline: true,
+            );
+            monitoringService.updateDriverStatus(_localDriverStatus!);
+          }
         },
       );
 
       if (locationStarted) {
         debugPrint("Location tracking started successfully");
-        // Start periodic location updates
-        _locationUpdateTimer =
-            Timer.periodic(const Duration(seconds: 30), (timer) async {
-          final position = await locationService.getCurrentLocation();
-          if (position != null) {
-            monitoringService.updateDriverLocation(
-                auth.currentUser!.id, position);
+        _statusUpdateTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
+          if (_localDriverStatus != null) {
+            final position = await locationService.getCurrentLocation();
+            if (position != null) {
+              _localDriverStatus = DriverStatus(
+                driverId: _driverId!,
+                busNumber: _busNumber!,
+                location: position,
+                alertLevel: _localDriverStatus!.alertLevel,
+                lastUpdate: DateTime.now(),
+                isDrowsy: _localDriverStatus!.isDrowsy,
+                closedEyeFrames: _localDriverStatus!.closedEyeFrames,
+                isOnline: true,
+              );
+              monitoringService.updateDriverStatus(_localDriverStatus!);
+            }
           }
         });
       } else {
@@ -223,6 +261,11 @@ class _DriverScreenState extends State<DriverScreen>
     _isDetecting = false;
     _closedEyeFrames = 0;
     _alertTriggered = false;
+    // NEW: Reset alert tracking
+    _alertCount = 0;
+    _firstAlertTime = null;
+    _secondAlertTime = null;
+    
     _eyeClosureTimer?.cancel();
     _stopAlert();
 
@@ -245,7 +288,6 @@ class _DriverScreenState extends State<DriverScreen>
     }
   }
 
-  // [Rest of the methods remain the same - _processCameraImage, _getInputImageFromCameraImage, etc.]
   Future<void> _processCameraImage(CameraImage image) async {
     final inputImage = _getInputImageFromCameraImage(image, _controller!);
     if (inputImage == null) {
@@ -272,15 +314,28 @@ class _DriverScreenState extends State<DriverScreen>
             _closedEyeFrames = 0;
           }
 
-          // Update monitoring service
-          final auth = context.read<AuthService>();
           final monitoringService = context.read<MonitoringService>();
-          if (auth.currentUser != null) {
-            monitoringService.updateDrowsinessStatus(
-              auth.currentUser!.id,
-              isDrowsy,
-              _closedEyeFrames,
+          if (_localDriverStatus != null && _driverId != null) {
+            DriverAlertLevel newAlertLevel = DriverAlertLevel.none;
+            if (_closedEyeFrames > 20) {
+              newAlertLevel = DriverAlertLevel.severe;
+            } else if (_closedEyeFrames > 10) {
+              newAlertLevel = DriverAlertLevel.moderate;
+            } else if (_closedEyeFrames > 5) {
+              newAlertLevel = DriverAlertLevel.mild;
+            }
+
+            _localDriverStatus = DriverStatus(
+              driverId: _driverId!,
+              busNumber: _busNumber!,
+              location: _localDriverStatus!.location,
+              alertLevel: newAlertLevel,
+              lastUpdate: DateTime.now(),
+              isDrowsy: isDrowsy,
+              closedEyeFrames: _closedEyeFrames,
+              isOnline: true,
             );
+            monitoringService.updateDriverStatus(_localDriverStatus!);
           }
         }
       } else {
@@ -291,6 +346,183 @@ class _DriverScreenState extends State<DriverScreen>
     }
   }
 
+  // NEW: Updated drowsiness alert with passenger notification
+  void _triggerDrowsinessAlert() async {
+    if (_alertTriggered) return;
+    _alertTriggered = true;
+    _alertCount++;
+    
+    // Record alert times
+    if (_alertCount == 1) {
+      _firstAlertTime = DateTime.now();
+    } else if (_alertCount == 2) {
+      _secondAlertTime = DateTime.now();
+      // NEW: Notify passengers after second alert
+      await _notifyPassengersOfDrowsiness();
+    }
+    
+    debugPrint("⚠️ Alert #$_alertCount: Possible Drowsiness Detected!");
+
+    try {
+      await _audioPlayer.play(AssetSource('sounds/beep.wav'), volume: 0.5);
+      if (await Vibration.hasVibrator()) {
+        Vibration.vibrate(pattern: [0, 300, 150, 300]);
+      }
+    } catch (e) {
+      debugPrint("Error playing gentle alert: $e");
+    }
+
+    if (mounted) {
+      _showGentleOverlay();
+    }
+
+    _alertEscalationTimer = Timer(const Duration(seconds: 5), () async {
+      if (_alertTriggered && mounted) {
+        debugPrint("⚠️ Escalating Alert: Still no acknowledgment.");
+        try {
+          await _audioPlayer.play(AssetSource('sounds/alarm.wav'), volume: 1.0);
+          if (await Vibration.hasVibrator()) {
+            Vibration.vibrate(pattern: [0, 600, 200, 600, 200, 600]);
+          }
+        } catch (e) {
+          debugPrint("Error playing escalated alert: $e");
+        }
+        _showEscalatedOverlay();
+      }
+    });
+
+    _autoStopTimer = Timer(const Duration(seconds: 15), () {
+      if (_alertTriggered && mounted) {
+        _stopAlert();
+      }
+    });
+  }
+
+  // NEW: Method to notify passengers of driver drowsiness
+  Future<void> _notifyPassengersOfDrowsiness() async {
+    final monitoringService = context.read<MonitoringService>();
+    
+    if (_driverId != null && _busNumber != null) {
+      try {
+        // Log incident for passengers to see
+        await monitoringService.logIncident(
+          _driverId!, 
+          'DROWSINESS_DETECTED', 
+          'Driver drowsiness alert triggered - Alert #$_alertCount at ${DateTime.now().toIso8601String()}'
+        );
+
+        // Create a special passenger alert status
+        await monitoringService.createPassengerAlert(
+          busNumber: _busNumber!,
+          alertType: 'DRIVER_DROWSINESS',
+          severity: 'HIGH',
+          message: 'Driver drowsiness detected. Safety monitoring active.',
+          timestamp: DateTime.now(),
+        );
+
+        debugPrint("📱 Passenger alert sent for bus $_busNumber");
+      } catch (e) {
+        debugPrint("Error notifying passengers: $e");
+      }
+    }
+  }
+
+  void _stopAlert() {
+    _audioPlayer.stop();
+    Vibration.cancel();
+    _alertTriggered = false;
+    _alertEscalationTimer?.cancel();
+    _autoStopTimer?.cancel();
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+  }
+
+  void _showGentleOverlay() {
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        barrierColor: Colors.black.withOpacity(0.3),
+        builder: (ctx) {
+          return AlertDialog(
+            title: Text("Stay Alert - Alert #$_alertCount"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text("It seems you may be feeling drowsy. Please take a break."),
+                if (_alertCount >= 2)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      "⚠️ Passengers have been notified for safety.",
+                      style: TextStyle(
+                        color: Colors.orange,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: _stopAlert,
+                child: const Text("I'm Okay"),
+              ),
+            ],
+          );
+        },
+      );
+    }
+  }
+
+  void _showEscalatedOverlay() {
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        barrierColor: Colors.black.withOpacity(0.6),
+        builder: (ctx) {
+          return AlertDialog(
+            title: Text(
+              "⚠️ Warning - Alert #$_alertCount",
+              style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text("Please pull over safely and rest before continuing."),
+                if (_alertCount >= 2)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      "🔔 Passengers are being alerted for their safety.",
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: _stopAlert,
+                child: const Text("I Understand"),
+              ),
+            ],
+          );
+        },
+      );
+    }
+  }
+
+  // [Include all the existing helper methods: _getInputImageFromCameraImage, _convertYUV420ToNV21, etc.]
   InputImage? _getInputImageFromCameraImage(
     CameraImage image,
     CameraController controller,
@@ -430,109 +662,6 @@ class _DriverScreenState extends State<DriverScreen>
     return nv21;
   }
 
-  void _triggerDrowsinessAlert() async {
-    if (_alertTriggered) return;
-    _alertTriggered = true;
-    debugPrint("⚠️ Gentle Alert: Possible Drowsiness Detected!");
-
-    try {
-      await _audioPlayer.play(AssetSource('sounds/beep.wav'), volume: 0.5);
-      if (await Vibration.hasVibrator()) {
-        Vibration.vibrate(pattern: [0, 300, 150, 300]);
-      }
-    } catch (e) {
-      debugPrint("Error playing gentle alert: $e");
-    }
-
-    if (mounted) {
-      _showGentleOverlay();
-    }
-
-    _alertEscalationTimer = Timer(const Duration(seconds: 5), () async {
-      if (_alertTriggered && mounted) {
-        debugPrint("⚠️ Escalating Alert: Still no acknowledgment.");
-        try {
-          await _audioPlayer.play(AssetSource('sounds/alarm.wav'), volume: 1.0);
-          if (await Vibration.hasVibrator()) {
-            Vibration.vibrate(pattern: [0, 600, 200, 600, 200, 600]);
-          }
-        } catch (e) {
-          debugPrint("Error playing escalated alert: $e");
-        }
-        _showEscalatedOverlay();
-      }
-    });
-
-    _autoStopTimer = Timer(const Duration(seconds: 15), () {
-      if (_alertTriggered && mounted) {
-        _stopAlert();
-      }
-    });
-  }
-
-  void _stopAlert() {
-    _audioPlayer.stop();
-    Vibration.cancel();
-    _alertTriggered = false;
-    _alertEscalationTimer?.cancel();
-    _autoStopTimer?.cancel();
-    if (mounted && Navigator.canPop(context)) {
-      Navigator.of(context, rootNavigator: true).pop();
-    }
-  }
-
-  void _showGentleOverlay() {
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        barrierColor: Colors.black.withOpacity(0.3),
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text("Stay Alert"),
-            content: const Text(
-                "It seems you may be feeling drowsy. Please take a break."),
-            actions: [
-              TextButton(
-                onPressed: _stopAlert,
-                child: const Text("I'm Okay"),
-              ),
-            ],
-          );
-        },
-      );
-    }
-  }
-
-  void _showEscalatedOverlay() {
-    if (mounted && Navigator.canPop(context)) {
-      Navigator.of(context, rootNavigator: true).pop();
-    }
-    if (mounted) {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        barrierColor: Colors.black.withOpacity(0.6),
-        builder: (ctx) {
-          return AlertDialog(
-            title: const Text(
-              "⚠️ Warning",
-              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-            ),
-            content: const Text(
-                "Please pull over safely and rest before continuing."),
-            actions: [
-              TextButton(
-                onPressed: _stopAlert,
-                child: const Text("I Understand"),
-              ),
-            ],
-          );
-        },
-      );
-    }
-  }
-
   Future<void> _logout() async {
     await context.read<AuthService>().logout();
     if (mounted) {
@@ -546,6 +675,7 @@ class _DriverScreenState extends State<DriverScreen>
 
     _stopDetection();
     _locationUpdateTimer?.cancel();
+    _statusUpdateTimer?.cancel();
     _eyeClosureTimer?.cancel();
     _alertEscalationTimer?.cancel();
     _autoStopTimer?.cancel();
@@ -557,13 +687,12 @@ class _DriverScreenState extends State<DriverScreen>
       _controller!.dispose();
     }
 
-    // Stop monitoring services
     final auth = context.read<AuthService>();
     final monitoringService = context.read<MonitoringService>();
     final locationService = context.read<LocationService>();
 
-    if (auth.currentUser != null) {
-      monitoringService.stopMonitoring(auth.currentUser!.id);
+    if (auth.currentUser != null && _driverId != null) {
+      monitoringService.stopMonitoring(_driverId!);
     }
     locationService.stopLocationTracking();
 
@@ -572,7 +701,7 @@ class _DriverScreenState extends State<DriverScreen>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    super.build(context);
 
     if (!_cameraInitialized || _controller == null || !_controller!.value.isInitialized) {
       return Scaffold(
@@ -636,37 +765,51 @@ class _DriverScreenState extends State<DriverScreen>
       ),
       body: Column(
         children: [
-          // Status indicator
           Consumer3<MonitoringService, LocationService, AuthService>(
             builder: (context, monitoring, location, auth, _) {
+              final isOnline = monitoring.currentDriverStatus?.isOnline ?? false;
               return Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
-                color: monitoring.isMonitoring && location.isTracking
+                color: monitoring.isMonitoring && location.isTracking && isOnline
                     ? Colors.green[100]
                     : Colors.orange[100],
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
-                      monitoring.isMonitoring && location.isTracking
+                      monitoring.isMonitoring && location.isTracking && isOnline
                           ? Icons.security
                           : Icons.warning,
-                      color: monitoring.isMonitoring && location.isTracking
+                      color: monitoring.isMonitoring && location.isTracking && isOnline
                           ? Colors.green
                           : Colors.orange,
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      monitoring.isMonitoring && location.isTracking
-                          ? 'Monitoring Active - HQ Connected'
-                          : 'Monitoring Inactive',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: monitoring.isMonitoring && location.isTracking
-                            ? Colors.green[700]
-                            : Colors.orange[700],
-                      ),
+                    Column(
+                      children: [
+                        Text(
+                          monitoring.isMonitoring && location.isTracking && isOnline
+                              ? 'Monitoring Active - HQ Connected'
+                              : 'Monitoring Inactive',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: monitoring.isMonitoring && location.isTracking && isOnline
+                                ? Colors.green[700]
+                                : Colors.orange[700],
+                          ),
+                        ),
+                        // NEW: Alert count indicator
+                        if (_alertCount > 0)
+                          Text(
+                            'Drowsiness Alerts: $_alertCount${_alertCount >= 2 ? ' (Passengers Notified)' : ''}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _alertCount >= 2 ? Colors.red : Colors.orange,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),
@@ -674,13 +817,11 @@ class _DriverScreenState extends State<DriverScreen>
             },
           ),
 
-          // Camera preview
           Expanded(
             child: Stack(
               children: [
                 CameraPreview(_controller!),
 
-                // Drowsiness indicator overlay
                 if (_closedEyeFrames > 10)
                   Positioned(
                     top: 20,
@@ -715,6 +856,45 @@ class _DriverScreenState extends State<DriverScreen>
                       ),
                     ),
                   ),
+
+                // NEW: Alert indicator overlay
+                if (_alertCount > 0)
+                  Positioned(
+                    top: 20,
+                    right: 20,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _alertCount >= 2 
+                            ? Colors.red.withOpacity(0.9)
+                            : Colors.orange.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Alerts: $_alertCount',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (_alertCount >= 2)
+                            const Text(
+                              'Passengers Notified',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -722,6 +902,7 @@ class _DriverScreenState extends State<DriverScreen>
           // Location and monitoring info
           Consumer2<LocationService, MonitoringService>(
             builder: (context, location, monitoring, _) {
+              final isOnline = monitoring.currentDriverStatus?.isOnline ?? false;
               return Container(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -751,15 +932,9 @@ class _DriverScreenState extends State<DriverScreen>
                         ),
                         _buildInfoCard(
                           'HQ Connection',
-                          monitoring.currentDriverStatus?.isOnline == true
-                              ? 'Online'
-                              : 'Offline',
-                          monitoring.currentDriverStatus?.isOnline == true
-                              ? Icons.cloud_done
-                              : Icons.cloud_off,
-                          monitoring.currentDriverStatus?.isOnline == true
-                              ? Colors.green
-                              : Colors.red,
+                          isOnline ? 'Online' : 'Offline',
+                          isOnline ? Icons.cloud_done : Icons.cloud_off,
+                          isOnline ? Colors.green : Colors.red,
                         ),
                       ],
                     ),
