@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { initializeApp } from 'firebase/app';
 import { getFirestore, } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
@@ -18,4 +19,26 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
+=======
+import { initializeApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+
+const firebaseConfig = {
+  apiKey: 'AIzaSyCE1QgwebhQ8NL4lcloclFyVWyIzjWmvMY',
+  appId: '1:521728664554:web:8ea0a5a61823fef9db4893',
+  messagingSenderId: '521728664554',
+  projectId: 'safe-commute-cb13b',
+  authDomain: 'safe-commute-cb13b.firebaseapp.com',
+  storageBucket: 'safe-commute-cb13b.firebasestorage.app',
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+
+// Initialize services
+export const db = getFirestore(app);
+export const auth = getAuth(app);
+
+>>>>>>> 7d2868648bbf5b1f6a9a5027c7607522eb8054ff
 export default app;
