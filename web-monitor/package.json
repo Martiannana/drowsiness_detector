@@ -13,10 +13,19 @@
     "firebase": "^12.1.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.541.0",
+<<<<<<< HEAD
+    "qrcode.react": "^4.2.0",
+=======
+>>>>>>> 7d2868648bbf5b1f6a9a5027c7607522eb8054ff
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-leaflet": "^4.2.1",
     "react-router-dom": "^7.8.2",
+<<<<<<< HEAD
+    "react-to-print": "^3.1.1",
+    "recharts": "^3.2.0",
+=======
+>>>>>>> 7d2868648bbf5b1f6a9a5027c7607522eb8054ff
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {

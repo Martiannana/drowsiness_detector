@@ -1,1 +1,2 @@
-mobile-app\n\nFlutter mobile app for driver drowsines detection
+# safe_commute
+SafeCommute: A mobile app for public transportation safety with drowsiness detection

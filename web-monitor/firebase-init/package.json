@@ -18,6 +18,10 @@
     "escalade": "^3.2.0",
     "faye-websocket": "^0.11.4",
     "firebase": "^12.1.0",
+<<<<<<< HEAD
+    "firebase-admin": "^13.5.0",
+=======
+>>>>>>> 7d2868648bbf5b1f6a9a5027c7607522eb8054ff
     "get-caller-file": "^2.0.5",
     "http-parser-js": "^0.5.10",
     "idb": "^7.1.1",
@@ -39,7 +43,10 @@
     "yargs": "^17.7.2",
     "yargs-parser": "^21.1.1"
   },
+<<<<<<< HEAD
+=======
   "devDependencies": {},
+>>>>>>> 7d2868648bbf5b1f6a9a5027c7607522eb8054ff
   "keywords": [],
   "author": "",
   "license": "ISC"
