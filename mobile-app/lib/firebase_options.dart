@@ -41,46 +41,46 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyCE1QgwebhQ8NL4lcloclFyVWyIzjWmvMY',
-    appId: '1:521728664554:web:8ea0a5a61823fef9db4893',
-    messagingSenderId: '521728664554',
-    projectId: 'safe-commute-cb13b',
-    authDomain: 'safe-commute-cb13b.firebaseapp.com',
-    storageBucket: 'safe-commute-cb13b.firebasestorage.app',
+    apiKey: '',
+    appId: '',
+    messagingSenderId: '',
+    projectId: '',
+    authDomain: '',
+    storageBucket: '',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyChoi0Vp9eyVmy6fiLKpn8-s25VN5gORvM',
-    appId: '1:521728664554:android:3b64ab8dbaab23dadb4893',
-    messagingSenderId: '521728664554',
-    projectId: 'safe-commute-cb13b',
-    storageBucket: 'safe-commute-cb13b.firebasestorage.app',
+    apiKey: '',
+    appId: '',
+    messagingSenderId: '',
+    projectId: '',
+    storageBucket: '',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyBtwjOco43VKlzdDUqioKAPraUqsZTxCLY',
-    appId: '1:521728664554:ios:6202837255836d0ddb4893',
-    messagingSenderId: '521728664554',
-    projectId: 'safe-commute-cb13b',
-    storageBucket: 'safe-commute-cb13b.firebasestorage.app',
-    iosBundleId: 'com.example.safeCommute',
+    apiKey: '',
+    appId: '',
+    messagingSenderId: '',
+    projectId: '',
+    storageBucket: '',
+    iosBundleId: '',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyBtwjOco43VKlzdDUqioKAPraUqsZTxCLY',
-    appId: '1:521728664554:ios:6202837255836d0ddb4893',
-    messagingSenderId: '521728664554',
-    projectId: 'safe-commute-cb13b',
-    storageBucket: 'safe-commute-cb13b.firebasestorage.app',
+    apiKey: '',
+    appId: '',
+    messagingSenderId: '',
+    projectId: '',
+    storageBucket: '',
     iosBundleId: 'com.example.safeCommute',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyCE1QgwebhQ8NL4lcloclFyVWyIzjWmvMY',
-    appId: '1:521728664554:web:8bbc4ce3023c31b9db4893',
-    messagingSenderId: '521728664554',
-    projectId: 'safe-commute-cb13b',
-    authDomain: 'safe-commute-cb13b.firebaseapp.com',
-    storageBucket: 'safe-commute-cb13b.firebasestorage.app',
+    apiKey: '',
+    appId: '',
+    messagingSenderId: '',
+    projectId: '',
+    authDomain: '',
+    storageBucket: '',
   );
 }
